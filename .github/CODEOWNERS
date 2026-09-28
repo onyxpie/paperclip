@@ -22,3 +22,10 @@ pnpm-workspace.yaml @cryppadotta @devinfoley @nickyleach @forgottendev
 /.github/workflows/** @kdubb1337
 /scripts/ci/** @kdubb1337
 /.github/CODEOWNERS @kdubb1337
+
+# Suites named by the fork focused-tests gate. The gate catches skipped or
+# missing suites; weakened assertions need code-owner review instead.
+/server/src/__tests__/agent-key-delegation-routes.test.ts @kdubb1337
+/server/src/__tests__/agent-key-delegation-unit.test.ts @kdubb1337
+/server/src/__tests__/openapi-routes.test.ts @kdubb1337
+/packages/db/src/migration-snapshot-drift.test.ts @kdubb1337
