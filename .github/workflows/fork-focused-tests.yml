@@ -1,7 +1,13 @@
 name: Fork focused tests
 
-# ONY-223 C3 negative proof (ii): openapi-routes is removed from the vitest
-# run but still named in the gate, which must report it MISSING.
+# Fork-only check for onyxpie/paperclip. pr.yml calls upstream's
+# pr-trusted.yml, which only runs on upstream's runners, so no tests run here
+# without this. It covers the scoped issue-document key suites and the server
+# typecheck on a standard GitHub-hosted runner.
+#
+# The gate step fails closed if any named suite is missing from the vitest
+# report, has zero passed tests, or has any skipped/todo/failed test (ONY-223
+# C3). Changes to this file and scripts/ci/** need code-owner review.
 
 on:
   pull_request:
@@ -15,6 +21,8 @@ concurrency:
 
 jobs:
   focused:
+    # A skipped job satisfies a required check. This condition is always true
+    # for PRs into this repo; changing it needs code-owner review (CODEOWNERS).
     if: github.repository == 'onyxpie/paperclip'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -55,6 +63,7 @@ jobs:
           --outputFile=vitest-focused.json
           server/src/__tests__/agent-key-delegation-routes.test.ts
           server/src/__tests__/agent-key-delegation-unit.test.ts
+          server/src/__tests__/openapi-routes.test.ts
           packages/db/src/migration-snapshot-drift.test.ts
 
       - name: Gate on missing or skipped suites
