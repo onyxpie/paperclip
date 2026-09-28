@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   AGENT_ICON_NAMES,
   AGENT_ROLES,
+  AGENT_KEY_KIND_ISSUE_DOCUMENT_READ,
   AGENT_STATUSES,
   INBOX_MINE_ISSUE_STATUS_FILTER,
 } from "../constants.js";
@@ -188,15 +189,36 @@ export const skillTestAgentKeyScopeSchema = z.object({
   issueId: z.string().guid(),
 }).strict();
 
+/** Lowercase issue document key; mirrors `issueDocumentKeySchema`. */
+export const agentKeyDocumentKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/, "Document key must be lowercase letters, numbers, _ or -");
+
+/**
+ * Read-only key for exactly one issue document. The server allows only GET on
+ * that document, its revisions, `/agents/me`, and self-rotation; every other
+ * route returns 403. Keys of this kind always carry an `expiresAt`.
+ */
+export const issueDocumentReadAgentKeyScopeSchema = z.object({
+  kind: z.literal(AGENT_KEY_KIND_ISSUE_DOCUMENT_READ),
+  issueId: z.string().guid(),
+  documentKey: agentKeyDocumentKeySchema,
+}).strict();
+
 export const agentApiKeyScopeSchema = z.union([
   standardAgentKeyScopeSchema,
   taskBridgeAgentKeyScopeSchema,
   skillTestAgentKeyScopeSchema,
+  issueDocumentReadAgentKeyScopeSchema,
 ]);
 
 export type AgentApiKeyScope = z.infer<typeof agentApiKeyScopeSchema>;
 export type TaskBridgeAgentKeyScope = z.infer<typeof taskBridgeAgentKeyScopeSchema>;
 export type SkillTestAgentKeyScope = z.infer<typeof skillTestAgentKeyScopeSchema>;
+export type IssueDocumentReadAgentKeyScope = z.infer<typeof issueDocumentReadAgentKeyScopeSchema>;
 
 export function normalizeAgentApiKeyScope(value: unknown): AgentApiKeyScope {
   const parsed = agentApiKeyScopeSchema.safeParse(value);
@@ -206,6 +228,24 @@ export function normalizeAgentApiKeyScope(value: unknown): AgentApiKeyScope {
 export const createAgentKeySchema = z.object({
   name: z.string().min(1).default("default"),
   scope: agentApiKeyScopeSchema.optional().default({ kind: "standard" }),
+  /** Required for `issue_document_read` keys (max 30 days out); rejected for other kinds. */
+  expiresAt: z.string().datetime({ offset: true }).optional(),
+}).superRefine((value, ctx) => {
+  const isDocumentRead = value.scope.kind === AGENT_KEY_KIND_ISSUE_DOCUMENT_READ;
+  if (isDocumentRead && !value.expiresAt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "issue_document_read keys require expiresAt",
+      path: ["expiresAt"],
+    });
+  }
+  if (!isDocumentRead && value.expiresAt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "expiresAt is only supported for issue_document_read keys",
+      path: ["expiresAt"],
+    });
+  }
 });
 
 export type CreateAgentKey = z.infer<typeof createAgentKeySchema>;

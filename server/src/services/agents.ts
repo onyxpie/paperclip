@@ -24,6 +24,7 @@ import {
   getAgentWorkEligibility,
   isUuidLike,
   normalizeAgentApiKeyScope,
+  AGENT_KEY_KIND_ISSUE_DOCUMENT_READ,
   normalizeAgentUrlKey,
   type AgentEligibilityAgent,
   type AgentApiKeyScope,
@@ -37,6 +38,7 @@ import {
   collectUserSecretRefs,
   syncAgentAdapterEnvBindings,
 } from "./agent-secret-bindings.js";
+import { issueDocumentReadKeyHash } from "./agent-key-delegation.js";
 import { logActivity } from "./activity-log.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
@@ -1233,7 +1235,7 @@ export function agentService(db: Db) {
       id: string,
       name: string,
       scope: AgentApiKeyScope = { kind: "standard" },
-      options?: { responsibleUserId?: string | null },
+      options?: { responsibleUserId?: string | null; expiresAt?: Date | null },
     ) => {
       const existing = await getById(id);
       if (!existing) throw notFound("Agent not found");
@@ -1245,7 +1247,9 @@ export function agentService(db: Db) {
       }
 
       const token = createToken();
-      const keyHash = hashToken(token);
+      const keyHash = scope.kind === AGENT_KEY_KIND_ISSUE_DOCUMENT_READ
+        ? issueDocumentReadKeyHash(token)
+        : hashToken(token);
       const created = await db
         .insert(agentApiKeys)
         .values({
@@ -1255,6 +1259,7 @@ export function agentService(db: Db) {
           keyHash,
           responsibleUserId: options?.responsibleUserId?.trim() || null,
           scopeConfig: scope.kind === "standard" ? null : scope,
+          expiresAt: options?.expiresAt ?? null,
         })
         .returning()
         .then((rows) => rows[0]);
@@ -1266,6 +1271,7 @@ export function agentService(db: Db) {
         responsibleUserId: created.responsibleUserId,
         token,
         createdAt: created.createdAt,
+        expiresAt: created.expiresAt,
       };
     },
 
@@ -1277,6 +1283,7 @@ export function agentService(db: Db) {
           responsibleUserId: agentApiKeys.responsibleUserId,
           scopeConfig: agentApiKeys.scopeConfig,
           createdAt: agentApiKeys.createdAt,
+          expiresAt: agentApiKeys.expiresAt,
           revokedAt: agentApiKeys.revokedAt,
         })
         .from(agentApiKeys)
@@ -1287,6 +1294,7 @@ export function agentService(db: Db) {
           scope: normalizeAgentApiKeyScope(row.scopeConfig),
           responsibleUserId: row.responsibleUserId,
           createdAt: row.createdAt,
+          expiresAt: row.expiresAt,
           revokedAt: row.revokedAt,
         }))),
 
@@ -1300,6 +1308,7 @@ export function agentService(db: Db) {
           responsibleUserId: agentApiKeys.responsibleUserId,
           scopeConfig: agentApiKeys.scopeConfig,
           createdAt: agentApiKeys.createdAt,
+          expiresAt: agentApiKeys.expiresAt,
           revokedAt: agentApiKeys.revokedAt,
         })
         .from(agentApiKeys)

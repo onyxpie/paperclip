@@ -26,6 +26,7 @@ import {
   ADAPTER_AGNOSTIC_KEYS,
   AGENT_DEFAULT_MAX_CONCURRENT_RUNS,
   createAgentKeySchema,
+  AGENT_KEY_KIND_ISSUE_DOCUMENT_READ,
   createAgentHireSchema,
   createAgentSchema,
   deriveAgentUrlKey,
@@ -107,6 +108,7 @@ import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { skillVersionSelectionMap } from "../services/runtime-skill-selections.js";
 import { isFixedClaudeOAuthBinding, secretService } from "../services/secrets.js";
 import { authorizationDeniedDetails } from "../services/authorization.js";
+import { assertIssueDocumentReadExpiry } from "../services/agent-key-delegation.js";
 import { providerTraceStore } from "../services/provider-trace-store.js";
 import {
   persistReprojectedWorkspaceDiffs,
@@ -4138,6 +4140,22 @@ export function agentRoutes(
       res.status(404).json({ error: "Agent not found" });
       return;
     }
+    if (req.actor.keyScope?.kind === AGENT_KEY_KIND_ISSUE_DOCUMENT_READ) {
+      const key = req.actor.keyId ? await svc.getKeyById(req.actor.keyId) : null;
+      res.json({
+        id: agent.id,
+        companyId: agent.companyId,
+        name: agent.name,
+        status: agent.status,
+        keyScope: {
+          kind: req.actor.keyScope.kind,
+          issueId: req.actor.keyScope.issueId,
+          documentKey: req.actor.keyScope.documentKey,
+          expiresAt: key?.expiresAt ?? null,
+        },
+      });
+      return;
+    }
     if (
       req.actor.keyScope?.kind === "task_bridge"
       || req.actor.keyScope?.kind === "skill_test"
@@ -5686,8 +5704,18 @@ export function agentRoutes(
     if (!agent) {
       return;
     }
+    let expiresAt: Date | null = null;
+    if (req.body.scope?.kind === AGENT_KEY_KIND_ISSUE_DOCUMENT_READ) {
+      expiresAt = new Date(req.body.expiresAt);
+      assertIssueDocumentReadExpiry(expiresAt);
+      const scopedIssue = await issueService(db).getById(req.body.scope.issueId);
+      if (!scopedIssue || scopedIssue.companyId !== agent.companyId) {
+        throw unprocessable("Scoped issue must belong to the agent's company");
+      }
+    }
     const key = await svc.createApiKey(id, req.body.name, req.body.scope, {
       responsibleUserId: req.actor.userId ?? null,
+      expiresAt,
     });
 
     await logActivity(db, {
@@ -5700,7 +5728,9 @@ export function agentRoutes(
       details: {
         keyId: key.id,
         name: key.name,
+        holderAgentId: agent.id,
         scope: key.scope,
+        expiresAt: key.expiresAt,
         responsibleUserId: key.responsibleUserId,
       },
     });
@@ -5736,7 +5766,13 @@ export function agentRoutes(
       action: "agent.key_revoked",
       entityType: "agent",
       entityId: agent.id,
-      details: { keyId: key.id, name: key.name },
+      details: {
+        keyId: key.id,
+        name: key.name,
+        holderAgentId: agent.id,
+        scope: key.scope,
+        expiresAt: key.expiresAt,
+      },
     });
 
     res.json({ ok: true });

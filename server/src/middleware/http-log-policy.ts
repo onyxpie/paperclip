@@ -39,6 +39,7 @@ function normalizePath(url: string): string {
 
 const SECRET_SENSITIVE_HTTP_PATHS = [
   /^\/api\/chat-endpoints\/[^/]+\/setup(?:-secret)?(?:\/|$)/,
+  /^\/api\/agent-key-enrollments\/exchange\/?$/,
 ];
 const SECRET_SENSITIVE_HTTP_METHODS = new Set(["POST", "PUT", "PATCH"]);
 

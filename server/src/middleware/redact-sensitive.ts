@@ -53,6 +53,9 @@ const SENSITIVE_KEYS = new Set<string>([
   "sessiontoken",
   "private_key",
   "privatekey",
+  // Single-use agent key enrollment codes (ONY-200 K4).
+  "enrollmentcode",
+  "enrollment_code",
   // Defense in depth for legacy, malformed, or provider-specific payloads
   // that place a credential outside the standard `credentials` envelope.
   "app_secret",

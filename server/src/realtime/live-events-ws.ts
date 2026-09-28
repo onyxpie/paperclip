@@ -9,6 +9,7 @@ import type { DeploymentMode } from "@paperclipai/shared";
 import type { BetterAuthSessionResult } from "../auth/better-auth.js";
 import { logger } from "../middleware/logger.js";
 import { subscribeCompanyLiveEvents } from "../services/live-events.js";
+import { claimsIssueDocumentReadScope } from "../services/agent-key-delegation.js";
 
 interface WsSocket {
   readyState: number;
@@ -211,6 +212,10 @@ async function authorizeUpgrade(
   if (!key || key.companyId !== companyId) {
     return null;
   }
+  // Read-only document keys never receive company live events, and expired
+  // keys never authenticate.
+  if (claimsIssueDocumentReadScope(key.scopeConfig)) return null;
+  if (key.expiresAt && key.expiresAt.getTime() <= Date.now()) return null;
 
   await db
     .update(agentApiKeys)

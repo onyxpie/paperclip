@@ -214,6 +214,15 @@ export type IssueReviewPolicy = (typeof ISSUE_REVIEW_POLICIES)[number];
 export const ISSUE_WORK_MODES = ["standard", "ask", "planning", "skill_test"] as const;
 export type IssueWorkMode = (typeof ISSUE_WORK_MODES)[number];
 export const ISSUE_HARNESS_KINDS = ["skill_test"] as const;
+
+/** Agent API key kind that can only read one issue document (ONY-200 K1). */
+export const AGENT_KEY_KIND_ISSUE_DOCUMENT_READ = "issue_document_read" as const;
+/** Hard ceiling on `issue_document_read` key lifetime and issuer-rule `maxTtlDays`. */
+export const AGENT_KEY_ISSUE_DOCUMENT_READ_MAX_TTL_DAYS = 30;
+/** After self-rotation the previous key keeps working until the new key is first used, or this long. */
+export const AGENT_KEY_ROTATION_GRACE_MS = 10 * 60 * 1000;
+/** Single-use enrollment codes created by a delegated issuer expire after this long. */
+export const AGENT_KEY_ENROLLMENT_CODE_TTL_MS = 30 * 60 * 1000;
 export type IssueHarnessKind = (typeof ISSUE_HARNESS_KINDS)[number];
 export const MAX_ISSUE_REQUEST_DEPTH = 1024;
 

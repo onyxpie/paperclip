@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Request, RequestHandler } from "express";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   activityLog,
@@ -26,6 +26,11 @@ import type { BetterAuthSessionResult } from "../auth/better-auth.js";
 import { logger } from "./logger.js";
 import { captureRunIdentity } from "../services/run-identity.js";
 import { boardAuthService } from "../services/board-auth.js";
+import {
+  ISSUE_DOCUMENT_READ_KEY_HASH_PREFIX,
+  claimsIssueDocumentReadScope,
+  parseIssueDocumentReadScope,
+} from "../services/agent-key-delegation.js";
 
 const CLOUD_TENANT_WRITE_DEBOUNCE_MS = 5_000;
 const CLOUD_TENANT_WRITE_DEBOUNCE_MAX = 1_000;
@@ -208,6 +213,40 @@ async function auditAgentKeyMissingResponsibleUser(
   }
 }
 
+/**
+ * First authenticated use of a rotated-in `issue_document_read` key revokes
+ * the key it replaced, ending that key's rotation grace period early.
+ */
+async function completeRotationOnSuccessorUse(
+  db: Db,
+  input: { companyId: string; agentId: string; keyId: string },
+) {
+  const revoked = await db
+    .update(agentApiKeys)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(agentApiKeys.rotatedToKeyId, input.keyId), isNull(agentApiKeys.revokedAt)))
+    .returning({ id: agentApiKeys.id });
+  for (const previous of revoked) {
+    try {
+      await db.insert(activityLog).values({
+        companyId: input.companyId,
+        actorType: "agent",
+        actorId: input.agentId,
+        action: "agent_key.rotation_completed",
+        entityType: "agent_api_key",
+        entityId: previous.id,
+        agentId: input.agentId,
+        details: { holderAgentId: input.agentId, previousKeyId: previous.id, keyId: input.keyId },
+      });
+    } catch (err) {
+      logger.warn(
+        { err, companyId: input.companyId, agentId: input.agentId, keyId: input.keyId },
+        "Failed to audit completed agent key rotation",
+      );
+    }
+  }
+}
+
 interface ActorMiddlewareOptions {
   deploymentMode: DeploymentMode;
   resolveSession?: (req: Request) => Promise<BetterAuthSessionResult | null>;
@@ -341,7 +380,10 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
     const key = await db
       .select()
       .from(agentApiKeys)
-      .where(and(eq(agentApiKeys.keyHash, tokenHash), isNull(agentApiKeys.revokedAt)))
+      .where(and(
+        inArray(agentApiKeys.keyHash, [tokenHash, `${ISSUE_DOCUMENT_READ_KEY_HASH_PREFIX}${tokenHash}`]),
+        isNull(agentApiKeys.revokedAt),
+      ))
       .then((rows) => rows[0] ?? null);
 
     if (!key) {
@@ -436,6 +478,21 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
       return;
     }
 
+    const isIssueDocumentReadKey = claimsIssueDocumentReadScope(key.scopeConfig);
+    const hasIssueDocumentReadHash = key.keyHash.startsWith(ISSUE_DOCUMENT_READ_KEY_HASH_PREFIX);
+    if (
+      isIssueDocumentReadKey !== hasIssueDocumentReadHash
+      || (isIssueDocumentReadKey && (!parseIssueDocumentReadScope(key.scopeConfig) || !key.expiresAt))
+    ) {
+      // Fail closed: a read-only key must never fall back to standard authority.
+      next(unauthorized("Agent key scope is invalid; obtain fresh credentials and retry"));
+      return;
+    }
+    if (key.expiresAt && key.expiresAt.getTime() <= Date.now()) {
+      next(unauthorized("Agent key has expired; obtain fresh credentials and retry"));
+      return;
+    }
+
     await db
       .update(agentApiKeys)
       .set({ lastUsedAt: new Date() })
@@ -473,6 +530,10 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
         code: "RESPONSIBLE_USER_UNAVAILABLE",
       }));
       return;
+    }
+
+    if (isIssueDocumentReadKey) {
+      await completeRotationOnSuccessorUse(db, { companyId: key.companyId, agentId: key.agentId, keyId: key.id });
     }
 
     req.actor = {
