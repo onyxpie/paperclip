@@ -92,6 +92,12 @@ import { resolveClaudeDesiredSkillNames } from "./skills.js";
 import { isBedrockModelId } from "./models.js";
 import { prepareClaudePromptBundle } from "./prompt-cache.js";
 import { buildClaudeExecutionPermissionArgs, claudeSandboxPermissionEnv } from "./permissions.js";
+import {
+  claudeSandboxNetworkCanaryArgs,
+  describeClaudeSandboxNetworkCanary,
+  findCanaryConflictingArg,
+  resolveClaudeSandboxNetworkCanary,
+} from "./sandbox-network-canary.js";
 import { resolveClaudeModel, SANDBOX_INSTALL_COMMAND } from "../index.js";
 import {
   createClaudeAcpExecutor,
@@ -396,6 +402,24 @@ export async function runClaudeLogin(input: {
   });
 }
 
+async function sandboxNetworkCanaryRejected(
+  ctx: AdapterExecutionContext,
+  errorMessage: string,
+): Promise<AdapterExecutionResult> {
+  await ctx.onLog("stderr", `[paperclip] ${errorMessage}\n`);
+  return {
+    exitCode: 1,
+    signal: null,
+    timedOut: false,
+    errorCode: "sandbox_network_canary_rejected",
+    errorMessage,
+    resultJson: {
+      stopReason: "sandbox_network_canary_rejected",
+      executionRecovery: { kind: "bootstrap", providerWorkStarted: false },
+    },
+  };
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const engineSelection = await resolveClaudeExecutionEngineForRun(ctx);
   if (engineSelection.unavailableReason) {
@@ -409,6 +433,23 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         executionRecovery: { kind: "bootstrap", providerWorkStarted: false },
       },
     };
+  }
+  // Operator-only sandbox-network canary (server env, never adapterConfig).
+  // Unset or aimed at another agent: `inactive`, nothing below changes.
+  const sandboxNetworkCanary = await resolveClaudeSandboxNetworkCanary({ agentId: ctx.agent.id });
+  if (sandboxNetworkCanary.kind === "inactive" && sandboxNetworkCanary.notice) {
+    await ctx.onLog("stderr", `[paperclip] ${sandboxNetworkCanary.notice}\n`);
+  }
+  if (sandboxNetworkCanary.kind === "active" && engineSelection.engine === "acp") {
+    // acpx forwards only model/allowedTools/maxTurns in `_meta.claudeCode.options`,
+    // so the flag-tier settings cannot reach Claude on ACP. Fail closed.
+    return sandboxNetworkCanaryRejected(
+      ctx,
+      "sandbox-network canary rejected: the target agent runs the ACP engine, which cannot carry flag-tier settings; use engine=cli.",
+    );
+  }
+  if (sandboxNetworkCanary.kind === "rejected") {
+    return sandboxNetworkCanaryRejected(ctx, sandboxNetworkCanary.message);
   }
   if (engineSelection.engine === "acp") {
     return executeClaudeAcp(ctx);
@@ -476,6 +517,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     extraArgs,
   } = runtimeConfig;
   Object.assign(env, claudeSandboxPermissionEnv({ dangerouslySkipPermissions, targetIsSandbox: executionTargetIsSandbox }));
+  if (sandboxNetworkCanary.kind === "active") {
+    if (executionTargetIsRemote) {
+      return sandboxNetworkCanaryRejected(
+        ctx,
+        "sandbox-network canary rejected: only local execution targets are supported.",
+      );
+    }
+    const conflictingArg = findCanaryConflictingArg(extraArgs);
+    if (conflictingArg) {
+      return sandboxNetworkCanaryRejected(
+        ctx,
+        `sandbox-network canary rejected: adapter extraArgs already set ${conflictingArg}.`,
+      );
+    }
+    await onLog("stdout", describeClaudeSandboxNetworkCanary(sandboxNetworkCanary));
+  }
   let loggedEnv = initialLoggedEnv;
   let effectiveExecutionCwd = adapterExecutionTargetRemoteCwd(executionTarget, cwd);
   const terminalResultCleanupGraceMs = Math.max(
@@ -905,6 +962,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
     args.push("--add-dir", effectivePromptBundleAddDir);
     if (extraArgs.length > 0) args.push(...extraArgs);
+    args.push(...claudeSandboxNetworkCanaryArgs(sandboxNetworkCanary));
     return args;
   };
 
