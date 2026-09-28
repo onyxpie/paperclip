@@ -2,8 +2,9 @@ name: Fork focused tests
 
 # Fork-only check for onyxpie/paperclip. pr.yml calls upstream's
 # pr-trusted.yml, which only runs on upstream's runners, so no tests run here
-# without this. It covers the scoped issue-document key suites and the server
-# typecheck on a standard GitHub-hosted runner.
+# without this. It covers the scoped issue-document key suites, the managed
+# GitHub launcher suites (ONY-223 C2), and the server typecheck on a standard
+# GitHub-hosted runner.
 #
 # The gate step fails closed if any named suite is missing from the vitest
 # report, has zero passed tests, or has any skipped/todo/failed test (ONY-223
@@ -65,6 +66,9 @@ jobs:
           server/src/__tests__/agent-key-delegation-unit.test.ts
           server/src/__tests__/openapi-routes.test.ts
           packages/db/src/migration-snapshot-drift.test.ts
+          packages/adapter-utils/src/github-launcher-policy.test.ts
+          packages/adapter-utils/src/github-launcher.test.ts
+          packages/adapter-utils/src/github-launcher-environment.test.ts
 
       - name: Gate on missing or skipped suites
         if: ${{ !cancelled() }}
@@ -74,3 +78,6 @@ jobs:
           server/src/__tests__/agent-key-delegation-unit.test.ts
           server/src/__tests__/openapi-routes.test.ts
           packages/db/src/migration-snapshot-drift.test.ts
+          packages/adapter-utils/src/github-launcher-policy.test.ts
+          packages/adapter-utils/src/github-launcher.test.ts
+          packages/adapter-utils/src/github-launcher-environment.test.ts
