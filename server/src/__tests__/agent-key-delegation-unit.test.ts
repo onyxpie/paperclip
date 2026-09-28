@@ -154,6 +154,43 @@ describe("issueDocumentReadKeyGuard", () => {
     }
   });
 
+  it("denies writes, other issues, other documents, annotations and every other route", async () => {
+    for (const [method, path, query] of [
+      ["POST", `/api/issues/${ISSUE_ID}/comments`],
+      ["PUT", `/api/issues/${ISSUE_ID}/documents/sandbox-deny`],
+      ["PATCH", `/api/issues/${ISSUE_ID}`],
+      ["DELETE", `/api/issues/${ISSUE_ID}/documents/sandbox-deny`],
+      ["POST", `/api/issues/${ISSUE_ID}/documents/sandbox-deny/lock`],
+      ["POST", `/api/issues/${ISSUE_ID}/documents/sandbox-deny/revisions/x/restore`],
+      ["GET", `/api/issues/${OTHER_ISSUE_ID}/documents/sandbox-deny`],
+      ["GET", `/api/issues/ONY-200/documents/sandbox-deny`],
+      ["GET", `/api/issues/${ISSUE_ID}/documents/plan`],
+      ["GET", `/api/issues/${ISSUE_ID}/documents/sandbox-deny/annotations`],
+      ["GET", `/api/issues/${ISSUE_ID}/documents/sandbox-deny`, { includeAnnotations: "true" }],
+      ["GET", `/api/issues/${ISSUE_ID}/documents/sandbox-deny%2F..%2Fplan`],
+      ["GET", `/api/issues/${ISSUE_ID}`],
+      ["GET", `/api/issues/${ISSUE_ID}/comments`],
+      ["GET", `/api/issues/${ISSUE_ID}/documents`],
+      ["GET", "/api/agents/me/inbox-lite"],
+      ["GET", "/api/agents/me/key-issuer-rules"],
+      ["GET", `/api/companies/${COMPANY_ID}`],
+      ["GET", `/api/companies/${COMPANY_ID}/agents`],
+      ["GET", `/api/companies/${COMPANY_ID}/secrets`],
+      ["POST", "/api/agents/reader/keys"],
+      ["GET", "/api/agents/me/keys/revoke"],
+      ["DELETE", "/api/agents/me/keys/revoke"],
+      ["POST", "/api/agents/me/keys/revoke/extra"],
+      ["POST", "/api/agent-key-enrollments/exchange"],
+      ["GET", "/"],
+      ["GET", "/llms.txt"],
+    ] as const) {
+      expect(
+        await runGuard({ method, path, query: query as Record<string, unknown> | undefined }),
+        `${method} ${path}`,
+      ).toEqual({ allowed: false, status: 403 });
+    }
+  });
+
   it("does not apply to other key kinds", async () => {
     expect(await runGuard({
       method: "POST",
@@ -163,9 +200,18 @@ describe("issueDocumentReadKeyGuard", () => {
   });
 });
 
-// ONY-223 C3 negative proof (iii): a conditional skip must fail the gate.
-describe("ony223 negproof", () => {
-  it.skipIf(true)("is conditionally skipped", () => {
-    expect(true).toBe(true);
+describe("app wiring", () => {
+  it("mounts the guard right after actor resolution and before any API router", () => {
+    const source = readFileSync(fileURLToPath(new URL("../app.ts", import.meta.url)), "utf8");
+    const actor = source.indexOf("actorMiddleware(db, {");
+    const cloudControl = source.indexOf("app.use(cloudControlMiddleware());");
+    const guard = source.indexOf("app.use(issueDocumentReadKeyGuard(db));");
+    const firstRouteAfterActor = source.indexOf('app.use("/api/auth"');
+    const apiRouter = source.indexOf("const api = Router();");
+    expect(actor).toBeGreaterThan(0);
+    expect(guard).toBeGreaterThan(cloudControl);
+    expect(cloudControl).toBeGreaterThan(actor);
+    expect(guard).toBeLessThan(firstRouteAfterActor);
+    expect(guard).toBeLessThan(apiRouter);
   });
 });
