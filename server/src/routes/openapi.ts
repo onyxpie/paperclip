@@ -3620,6 +3620,16 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/agents/me/keys/revoke",
+  tags: ["agents"],
+  summary: "Revoke the calling issue_document_read key",
+  description:
+    "Only issue_document_read keys may call this, and only for themselves; the request body is ignored. The calling key stops working immediately, together with its rotation chain (a predecessor still in its grace period and any successor minted from it). A key that is already revoked or expired gets 401.",
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/companies/{companyId}/agent-key-issuer-rules",
   tags: ["agents"],

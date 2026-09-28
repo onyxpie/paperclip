@@ -44,7 +44,7 @@ function noStore(res: Response) {
 }
 
 /**
- * ONY-200 K2–K5: self-rotation for `issue_document_read` keys, board-managed
+ * ONY-200 K2–K5: self-rotation and self-revoke for `issue_document_read` keys, board-managed
  * delegated issuer rules, issuer-scoped key operations, and single-use
  * enrollment codes. Every mint, rotate, revoke, enroll-create and exchange is
  * written to the activity log without the key or code value.
@@ -409,6 +409,43 @@ export function agentKeyDelegationRoutes(db: Db) {
       previousKeyId: previous.id,
       previousKeyExpiresAt: previous.expiresAt,
     });
+  });
+
+  // ---- Holder: self-revoke (S1, uninstall) ----
+
+  router.post("/agents/me/keys/revoke", async (req, res) => {
+    if (
+      req.actor.type !== "agent"
+      || req.actor.source !== "agent_key"
+      || !req.actor.keyId
+      || req.actor.keyScope?.kind !== AGENT_KEY_KIND_ISSUE_DOCUMENT_READ
+    ) {
+      throw forbidden("Only issue_document_read keys can self-revoke");
+    }
+    // The request body is intentionally ignored: a key can only revoke itself and its rotation chain.
+    const { key, scope, revokedKeyIds } = await delegation.revokeSelf(req.actor.keyId);
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: key.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      agentApiKeyId: actor.agentApiKeyId,
+      action: "agent_key.revoked",
+      entityType: "agent_api_key",
+      entityId: key.id,
+      details: {
+        via: "self",
+        holderAgentId: key.agentId,
+        keyId: key.id,
+        revokedKeyIds,
+        scope,
+        expiresAt: key.expiresAt,
+      },
+    });
+    noStore(res);
+    res.json({ ok: true, keyId: key.id, revokedAt: key.revokedAt, revokedKeyIds });
   });
 
   return router;

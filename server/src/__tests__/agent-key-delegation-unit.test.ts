@@ -139,7 +139,7 @@ async function runGuard(input: {
 }
 
 describe("issueDocumentReadKeyGuard", () => {
-  it("allows only the scoped document reads, /agents/me, and rotation", async () => {
+  it("allows only the scoped document reads, /agents/me, rotation and self-revoke", async () => {
     for (const [method, path] of [
       ["GET", `/api/issues/${ISSUE_ID}/documents/sandbox-deny`],
       ["HEAD", `/api/issues/${ISSUE_ID}/documents/sandbox-deny`],
@@ -148,6 +148,7 @@ describe("issueDocumentReadKeyGuard", () => {
       ["GET", `/api/issues/ony-199/documents/SANDBOX-DENY/`],
       ["GET", "/api/agents/me"],
       ["POST", "/api/agents/me/keys/rotate"],
+      ["POST", "/api/agents/me/keys/revoke"],
     ] as const) {
       expect(await runGuard({ method, path }), `${method} ${path}`).toEqual({ allowed: true, status: 200 });
     }
@@ -176,6 +177,9 @@ describe("issueDocumentReadKeyGuard", () => {
       ["GET", `/api/companies/${COMPANY_ID}/agents`],
       ["GET", `/api/companies/${COMPANY_ID}/secrets`],
       ["POST", "/api/agents/reader/keys"],
+      ["GET", "/api/agents/me/keys/revoke"],
+      ["DELETE", "/api/agents/me/keys/revoke"],
+      ["POST", "/api/agents/me/keys/revoke/extra"],
       ["POST", "/api/agent-key-enrollments/exchange"],
       ["GET", "/"],
       ["GET", "/llms.txt"],

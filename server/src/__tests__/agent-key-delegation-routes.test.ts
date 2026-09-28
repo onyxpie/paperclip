@@ -573,6 +573,64 @@ describeEmbeddedPostgres("issue_document_read keys, rotation, delegated issuer a
     await assertNoSecretLeaks(s.company.id);
   }, 60_000);
 
+  it("S1: a read key revokes only itself and its rotation chain, immediately; standard keys cannot", async () => {
+    const s = await seed();
+    await createRule(s);
+
+    const veraKey = await mintStandardKey(s.vera.id);
+    expect((await request(app()).post("/api/agents/me/keys/revoke").set(bearer(veraKey))).status).toBe(403);
+    expect((await request(app()).get("/api/agents/me").set(bearer(veraKey))).status).toBe(200);
+    // Unauthenticated callers cannot revoke anything.
+    expect([401, 403]).toContain((await request(publicApp()).post("/api/agents/me/keys/revoke")).status);
+
+    // Rotate, then revoke with the old key while the successor is still unused (uninstall mid-rotation).
+    const old = await mintReadKey(s);
+    const sibling = await mintReadKey(s);
+    const rotated = await request(app()).post("/api/agents/me/keys/rotate").set(bearer(old.token));
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(201);
+    const next = { id: rotated.body.id as string, token: remember(rotated.body.token as string) };
+
+    const revoked = await request(app())
+      .post("/api/agents/me/keys/revoke")
+      .set(bearer(old.token))
+      .send({ keyId: sibling.id });
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+    expect(revoked.body.keyId).toBe(old.id);
+    expect([...revoked.body.revokedKeyIds].sort()).toEqual([old.id, next.id].sort());
+
+    for (const token of [old.token, next.token]) {
+      expect((await request(app()).get(docPath(s.issue.id)).set(bearer(token))).status).toBe(401);
+      // A second revoke is a 401, which the client treats as already revoked.
+      expect((await request(app()).post("/api/agents/me/keys/revoke").set(bearer(token))).status).toBe(401);
+    }
+    // The body cannot redirect the revoke to another key.
+    expect((await request(app()).get(docPath(s.issue.id)).set(bearer(sibling.token))).status).toBe(200);
+
+    // Self-revoke from a successor that has already been used.
+    const rotated2 = await request(app()).post("/api/agents/me/keys/rotate").set(bearer(sibling.token));
+    expect(rotated2.status, JSON.stringify(rotated2.body)).toBe(201);
+    const next2 = { id: rotated2.body.id as string, token: remember(rotated2.body.token as string) };
+    const selfRevoke = await request(app()).post("/api/agents/me/keys/revoke").set(bearer(next2.token));
+    expect(selfRevoke.status, JSON.stringify(selfRevoke.body)).toBe(200);
+    // The used successor's predecessor is retired too (by first use or by the revoke itself).
+    expect(selfRevoke.body.revokedKeyIds).toContain(next2.id);
+    for (const token of [sibling.token, next2.token]) {
+      expect((await request(app()).get(docPath(s.issue.id)).set(bearer(token))).status).toBe(401);
+    }
+
+    const rows = await activities(s.company.id);
+    const selfEntries = rows.filter((row) => row.action === "agent_key.revoked"
+      && (row.details as { via?: string } | null)?.via === "self");
+    expect(selfEntries.map((row) => row.entityId).sort()).toEqual([old.id, next2.id].sort());
+    expect(selfEntries.find((row) => row.entityId === old.id)?.details).toMatchObject({
+      holderAgentId: s.reader.id,
+      keyId: old.id,
+      scope: { kind: "issue_document_read", issueId: s.issue.id, documentKey: "sandbox-deny" },
+    });
+    expect((selfEntries[0]?.details as { expiresAt?: string }).expiresAt).toBeTruthy();
+    await assertNoSecretLeaks(s.company.id);
+  }, 60_000);
+
   it("K5: mint and board revoke entries carry holder, keyId, scope and expiry but never values", async () => {
     const s = await seed();
     const key = await mintReadKey(s);

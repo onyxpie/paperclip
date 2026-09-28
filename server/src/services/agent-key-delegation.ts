@@ -335,6 +335,62 @@ export function agentKeyDelegationService(db: Db) {
       };
     },
 
+    /**
+     * Holder self-revoke (uninstall): kills the calling `issue_document_read` key
+     * immediately, together with the rest of its rotation chain — a predecessor
+     * still in its grace period and any successor minted from it — so removing
+     * the daemon leaves no live key behind. No issuer rule is required: giving up
+     * access is always allowed.
+     */
+    revokeSelf: async (keyId: string) => {
+      const now = new Date();
+      return db.transaction(async (tx) => {
+        const current = await tx
+          .select()
+          .from(agentApiKeys)
+          .where(eq(agentApiKeys.id, keyId))
+          .for("update")
+          .then((rows) => rows[0] ?? null);
+        const scope = current ? parseIssueDocumentReadScope(current.scopeConfig) : null;
+        if (!current || !scope || current.revokedAt || !current.expiresAt || current.expiresAt <= now) {
+          throw unauthorized("Key is not an active issue_document_read key");
+        }
+        const chainIds: string[] = [];
+        let successorId = current.rotatedToKeyId;
+        while (successorId && chainIds.length < 16 && !chainIds.includes(successorId)) {
+          const successor = await tx
+            .select()
+            .from(agentApiKeys)
+            .where(eq(agentApiKeys.id, successorId))
+            .for("update")
+            .then((rows) => rows[0] ?? null);
+          if (!successor || successor.agentId !== current.agentId || successor.companyId !== current.companyId) break;
+          chainIds.push(successor.id);
+          successorId = successor.rotatedToKeyId;
+        }
+        const predecessors = await tx
+          .select({ id: agentApiKeys.id })
+          .from(agentApiKeys)
+          .where(and(
+            eq(agentApiKeys.rotatedToKeyId, current.id),
+            eq(agentApiKeys.agentId, current.agentId),
+            eq(agentApiKeys.companyId, current.companyId),
+          ))
+          .for("update");
+        const ids = [current.id, ...chainIds, ...predecessors.map((row) => row.id)];
+        const revoked = await tx
+          .update(agentApiKeys)
+          .set({ revokedAt: now })
+          .where(and(inArray(agentApiKeys.id, ids), isNull(agentApiKeys.revokedAt)))
+          .returning({ id: agentApiKeys.id });
+        return {
+          key: { ...current, revokedAt: now },
+          scope,
+          revokedKeyIds: revoked.map((row) => row.id),
+        };
+      });
+    },
+
     createEnrollmentCode: async (rule: AgentKeyIssuerRule, createdByAgentId: string, ttlDays?: number) => {
       const holder = await getAgent(rule.holderAgentId);
       if (!holder || holder.companyId !== rule.companyId || !isAuthenticatableAgentStatus(holder.status)) {

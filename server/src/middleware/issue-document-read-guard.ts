@@ -7,6 +7,7 @@ import { AGENT_KEY_KIND_ISSUE_DOCUMENT_READ, type IssueDocumentReadAgentKeyScope
 const READ_METHODS = new Set(["GET", "HEAD"]);
 const AGENTS_ME_PATH = /^\/api\/agents\/me\/?$/i;
 const ROTATE_PATH = /^\/api\/agents\/me\/keys\/rotate\/?$/i;
+const REVOKE_PATH = /^\/api\/agents\/me\/keys\/revoke\/?$/i;
 const DOCUMENT_PATH = /^\/api\/issues\/([^/]+)\/documents\/([^/]+)(\/revisions)?\/?$/i;
 
 function decodeSegment(segment: string) {
@@ -29,7 +30,8 @@ function deny(res: Parameters<RequestHandler>[1]) {
  * Runs once after actor resolution for every request, so a new or unaudited
  * route can never become reachable with a read-only document key. Allowed:
  * GET the scoped document and its revisions, GET `/api/agents/me`, and
- * POST `/api/agents/me/keys/rotate`. Everything else returns 403.
+ * POST `/api/agents/me/keys/rotate` and `/api/agents/me/keys/revoke`.
+ * Everything else returns 403.
  */
 export function issueDocumentReadKeyGuard(db: Db): RequestHandler {
   async function paramMatchesScopedIssue(param: string, scope: IssueDocumentReadAgentKeyScope, companyId: string) {
@@ -59,7 +61,7 @@ export function issueDocumentReadKeyGuard(db: Db): RequestHandler {
         next();
         return;
       }
-      if (method === "POST" && ROTATE_PATH.test(path)) {
+      if (method === "POST" && (ROTATE_PATH.test(path) || REVOKE_PATH.test(path))) {
         next();
         return;
       }
