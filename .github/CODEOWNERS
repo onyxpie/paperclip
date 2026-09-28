@@ -16,3 +16,9 @@ package.json @cryppadotta @devinfoley @nickyleach @forgottendev
 pnpm-lock.yaml @cryppadotta @devinfoley @nickyleach @forgottendev
 pnpm-workspace.yaml @cryppadotta @devinfoley @nickyleach @forgottendev
 .npmrc @cryppadotta @devinfoley @nickyleach @forgottendev
+
+# Fork (onyxpie/paperclip) CI gate ownership, ONY-223 C3. Last match wins, so
+# these override the upstream entries above for these paths.
+/.github/workflows/** @kdubb1337
+/scripts/ci/** @kdubb1337
+/.github/CODEOWNERS @kdubb1337
