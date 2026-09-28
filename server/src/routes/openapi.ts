@@ -28,6 +28,10 @@ import {
   updateAgentInstructionsBundleSchema,
   upsertAgentInstructionsFileSchema,
   createAgentKeySchema,
+  createAgentKeyIssuerRuleSchema,
+  updateAgentKeyIssuerRuleSchema,
+  createAgentKeyEnrollmentCodeSchema,
+  exchangeAgentKeyEnrollmentCodeSchema,
   builtInAgentEmptyMutationSchema,
   builtInAgentProvisionSchema,
   generateSummarySlotSchema,
@@ -3601,6 +3605,119 @@ registry.registerPath({
   summary: "Delete an agent API key",
   request: { params: z.object({ id: z.string(), keyId: z.string() }) },
   responses: { 200: r.ok(), 401: r.unauthorized, 404: r.notFound },
+});
+
+// Read-only issue document keys: rotation, delegated issuer rules, enrollment (ONY-200 K2–K4)
+
+registry.registerPath({
+  method: "post",
+  path: "/api/agents/me/keys/rotate",
+  tags: ["agents"],
+  summary: "Rotate the calling issue_document_read key",
+  description:
+    "Only issue_document_read keys may call this. The request body is ignored: the new key copies the calling key's scope and gets a fresh expiry capped by the matching issuer rule (30 days max). Returns 403 when no issuer rule covers the key. The calling key stops working when the new key is first used, or after 10 minutes.",
+  responses: { 201: r.ok(), 401: r.unauthorized, 403: r.forbidden, 409: r.conflict },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/agents/me/keys/revoke",
+  tags: ["agents"],
+  summary: "Revoke the calling issue_document_read key",
+  description:
+    "Only issue_document_read keys may call this, and only for themselves; the request body is ignored. The calling key stops working immediately, together with its rotation chain (a predecessor still in its grace period and any successor minted from it). A key that is already revoked or expired gets 401.",
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/agent-key-issuer-rules",
+  tags: ["agents"],
+  summary: "List delegated agent key issuer rules (board only)",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/companies/{companyId}/agent-key-issuer-rules",
+  tags: ["agents"],
+  summary: "Create a delegated agent key issuer rule (board only)",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    body: jsonBody(createAgentKeyIssuerRuleSchema),
+  },
+  responses: { 201: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 409: r.conflict, 422: r.unprocessable },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/agent-key-issuer-rules/{ruleId}",
+  tags: ["agents"],
+  summary: "Update a delegated agent key issuer rule (board only)",
+  request: {
+    params: z.object({ ruleId: z.string() }),
+    body: jsonBody(updateAgentKeyIssuerRuleSchema),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/agent-key-issuer-rules/{ruleId}",
+  tags: ["agents"],
+  summary: "Delete a delegated agent key issuer rule (board only)",
+  description: "Also revokes every live issue_document_read key the rule covers; their ids are returned as revokedKeyIds.",
+  request: { params: z.object({ ruleId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/agents/me/key-issuer-rules",
+  tags: ["agents"],
+  summary: "List issuer rules delegated to the calling agent",
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/agent-key-issuer-rules/{ruleId}/keys",
+  tags: ["agents"],
+  summary: "List key metadata for the rule's holder, issue and document (issuer only)",
+  request: { params: z.object({ ruleId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/agent-key-issuer-rules/{ruleId}/keys/{keyId}/revoke",
+  tags: ["agents"],
+  summary: "Revoke a key within the rule's holder, issue and document (issuer only)",
+  request: { params: z.object({ ruleId: z.string(), keyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/agent-key-issuer-rules/{ruleId}/enrollment-codes",
+  tags: ["agents"],
+  summary: "Create a single-use enrollment code for the rule's holder (issuer only)",
+  description: "The code is returned once, expires after 30 minutes, and only its SHA-256 hash is stored.",
+  request: {
+    params: z.object({ ruleId: z.string() }),
+    body: jsonBody(createAgentKeyEnrollmentCodeSchema),
+  },
+  responses: { 201: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 404: r.notFound, 409: r.conflict },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/agent-key-enrollments/exchange",
+  tags: ["agents"],
+  summary: "Exchange a single-use enrollment code for an issue_document_read key (unauthenticated)",
+  request: { body: jsonBody(exchangeAgentKeyEnrollmentCodeSchema) },
+  responses: { 201: r.ok(), 400: r.badRequest, 401: r.unauthorized },
 });
 
 registry.registerPath({

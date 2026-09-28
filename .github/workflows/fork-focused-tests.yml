@@ -1,0 +1,76 @@
+name: Fork focused tests
+
+# Fork-only check for onyxpie/paperclip. pr.yml calls upstream's
+# pr-trusted.yml, which only runs on upstream's runners, so no tests run here
+# without this. It covers the scoped issue-document key suites and the server
+# typecheck on a standard GitHub-hosted runner.
+#
+# The gate step fails closed if any named suite is missing from the vitest
+# report, has zero passed tests, or has any skipped/todo/failed test (ONY-223
+# C3). Changes to this file and scripts/ci/** need code-owner review.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-focused-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    # A skipped job satisfies a required check. This condition is always true
+    # for PRs into this repo; changing it needs code-owner review (CODEOWNERS).
+    if: github.repository == 'onyxpie/paperclip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 9.15.4
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace type dependencies
+        run: |
+          pnpm --filter @paperclipai/plugin-sdk ensure-build-deps
+          pnpm --filter @paperclipai/paperclip-runner build:typescript
+
+      - name: Server typecheck
+        run: pnpm exec tsc --noEmit -p server/tsconfig.json
+
+      - name: Focused tests
+        run: >-
+          pnpm vitest run
+          --reporter=default
+          --reporter=json
+          --outputFile=vitest-focused.json
+          server/src/__tests__/agent-key-delegation-routes.test.ts
+          server/src/__tests__/agent-key-delegation-unit.test.ts
+          server/src/__tests__/openapi-routes.test.ts
+          packages/db/src/migration-snapshot-drift.test.ts
+
+      - name: Gate on missing or skipped suites
+        if: ${{ !cancelled() }}
+        run: >-
+          node scripts/ci/check-focused-suites.mjs vitest-focused.json
+          server/src/__tests__/agent-key-delegation-routes.test.ts
+          server/src/__tests__/agent-key-delegation-unit.test.ts
+          server/src/__tests__/openapi-routes.test.ts
+          packages/db/src/migration-snapshot-drift.test.ts

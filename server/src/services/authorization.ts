@@ -18,9 +18,10 @@ import type {
   PermissionKey,
   PrincipalType,
   SkillTestAgentKeyScope,
+  IssueDocumentReadAgentKeyScope,
   TaskBridgeAgentKeyScope,
 } from "@paperclipai/shared";
-import { LOW_TRUST_REVIEW_PRESET, extractAgentMentionIds, type LowTrustBoundary } from "@paperclipai/shared";
+import { AGENT_KEY_KIND_ISSUE_DOCUMENT_READ, LOW_TRUST_REVIEW_PRESET, extractAgentMentionIds, type LowTrustBoundary } from "@paperclipai/shared";
 import {
   LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH,
   isIssueWithinLowTrustBoundary,
@@ -1264,6 +1265,29 @@ export function authorizationService(db: Db | DbTransaction) {
     return denySkillTest("Skill-test run token cannot use this API action.");
   }
 
+  function decideIssueDocumentReadAccess(input: {
+    action: AuthorizationAction;
+    resource: AuthorizationResource;
+    scope: IssueDocumentReadAgentKeyScope;
+  }): AuthorizationDecision {
+    if (
+      input.action === "issue:read"
+      && input.resource.type === "issue"
+      && input.resource.issueId === input.scope.issueId
+    ) {
+      return allow({
+        action: input.action,
+        reason: "allow_explicit_grant",
+        explanation: "Allowed read of the scoped issue for an issue_document_read key.",
+      });
+    }
+    return deny({
+      action: input.action,
+      reason: "deny_scope",
+      explanation: "issue_document_read keys can only read their scoped issue document.",
+    });
+  }
+
   async function assignmentTargetIsInCompany(resource: AuthorizationResource) {
     if (resource.type !== "issue") return true;
     if (resource.assigneeAgentId) {
@@ -1869,6 +1893,16 @@ export function authorizationService(db: Db | DbTransaction) {
         action: input.action,
         reason: "deny_company_boundary",
         explanation: "Actor agent was not found in the target company.",
+      });
+    }
+
+    if (input.actor.keyScope?.kind === AGENT_KEY_KIND_ISSUE_DOCUMENT_READ) {
+      // Defense in depth under issueDocumentReadKeyGuard: never fall through
+      // to the agent's own grants.
+      return decideIssueDocumentReadAccess({
+        action: input.action,
+        resource: input.resource,
+        scope: input.actor.keyScope,
       });
     }
 

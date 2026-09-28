@@ -24,6 +24,8 @@ import type { InspectDatabaseBackupHealthOptions } from "./services/database-bac
 import type { StorageService } from "./storage/types.js";
 import { httpLogger, errorHandler } from "./middleware/index.js";
 import { actorMiddleware } from "./middleware/auth.js";
+import { issueDocumentReadKeyGuard } from "./middleware/issue-document-read-guard.js";
+import { agentKeyDelegationRoutes } from "./routes/agent-key-delegation.js";
 import { boardMutationGuard } from "./middleware/board-mutation-guard.js";
 import {
   privateHostnameGuard,
@@ -570,6 +572,9 @@ export async function createApp(
   // REPLACES whatever actor the request otherwise resolved to, and only on
   // the one endpoint it authorizes (see the middleware for the contract).
   app.use(cloudControlMiddleware());
+  // Fail-closed allowlist for read-only issue document keys; must run before
+  // every route so unaudited routes stay unreachable with those keys.
+  app.use(issueDocumentReadKeyGuard(db));
   app.use("/api/auth", authRoutes(db));
   if (opts.betterAuthHandler) {
     app.all("/api/auth/{*authPath}", opts.betterAuthHandler);
@@ -729,6 +734,8 @@ export async function createApp(
     // production, so a failed login leaves no log trail.
     log: (line) => logger.info(line),
   });
+  // Before agentRoutes so `/agents/me/...` delegation paths are matched first.
+  api.use(agentKeyDelegationRoutes(db));
   api.use(
     agentRoutes(db, {
       chatRunRetries: chatChannels,

@@ -398,6 +398,10 @@ export {
   ISSUE_REVIEW_POLICIES,
   ISSUE_WORK_MODES,
   ISSUE_HARNESS_KINDS,
+  AGENT_KEY_KIND_ISSUE_DOCUMENT_READ,
+  AGENT_KEY_ISSUE_DOCUMENT_READ_MAX_TTL_DAYS,
+  AGENT_KEY_ROTATION_GRACE_MS,
+  AGENT_KEY_ENROLLMENT_CODE_TTL_MS,
   MAX_ISSUE_REQUEST_DEPTH,
   SUMMARY_SLOT_SCOPE_KINDS,
   SUMMARY_SLOT_KEYS,
@@ -1884,6 +1888,8 @@ export {
   standardAgentKeyScopeSchema,
   taskBridgeAgentKeyScopeSchema,
   skillTestAgentKeyScopeSchema,
+  issueDocumentReadAgentKeyScopeSchema,
+  agentKeyDocumentKeySchema,
   createAgentKeySchema,
   agentMineInboxQuerySchema,
   wakeAgentSchema,
@@ -1902,6 +1908,7 @@ export {
   type AgentApiKeyScope,
   type TaskBridgeAgentKeyScope,
   type SkillTestAgentKeyScope,
+  type IssueDocumentReadAgentKeyScope,
   type CreateAgentKey,
   type AgentMineInboxQuery,
   type WakeAgent,
@@ -2788,3 +2795,14 @@ export { MEMORY_CONNECTOR_IDS, isMemoryConnectorId, type MemoryConnectorId } fro
 export * from "./connection-routing.js";
 
 export { WORKSPACE_RESTORE_FAILURE_CODES, hasWorkspaceRestoreFailure, safeWorkspaceRestorePath } from "./workspace-restore.js";
+
+export {
+  createAgentKeyIssuerRuleSchema,
+  updateAgentKeyIssuerRuleSchema,
+  createAgentKeyEnrollmentCodeSchema,
+  exchangeAgentKeyEnrollmentCodeSchema,
+  type CreateAgentKeyIssuerRule,
+  type UpdateAgentKeyIssuerRule,
+  type CreateAgentKeyEnrollmentCode,
+  type ExchangeAgentKeyEnrollmentCode,
+} from "./validators/agent-key-delegation.js";

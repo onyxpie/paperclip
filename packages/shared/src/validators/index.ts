@@ -360,6 +360,8 @@ export {
   standardAgentKeyScopeSchema,
   taskBridgeAgentKeyScopeSchema,
   skillTestAgentKeyScopeSchema,
+  issueDocumentReadAgentKeyScopeSchema,
+  agentKeyDocumentKeySchema,
   createAgentKeySchema,
   agentMineInboxQuerySchema,
   wakeAgentSchema,
@@ -378,6 +380,7 @@ export {
   type AgentApiKeyScope,
   type TaskBridgeAgentKeyScope,
   type SkillTestAgentKeyScope,
+  type IssueDocumentReadAgentKeyScope,
   type CreateAgentKey,
   type AgentMineInboxQuery,
   type WakeAgent,
@@ -984,3 +987,14 @@ export * from "./chat-channels.js";
 export * from "./chat-github.js";
 
 export * from "./email.js";
+
+export {
+  createAgentKeyIssuerRuleSchema,
+  updateAgentKeyIssuerRuleSchema,
+  createAgentKeyEnrollmentCodeSchema,
+  exchangeAgentKeyEnrollmentCodeSchema,
+  type CreateAgentKeyIssuerRule,
+  type UpdateAgentKeyIssuerRule,
+  type CreateAgentKeyEnrollmentCode,
+  type ExchangeAgentKeyEnrollmentCode,
+} from "./agent-key-delegation.js";
