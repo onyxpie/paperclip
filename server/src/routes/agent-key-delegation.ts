@@ -16,7 +16,7 @@ import {
   type AgentKeyIssuerRule,
 } from "../services/agent-key-delegation.js";
 import { authorizationDeniedDetails } from "../services/authorization.js";
-import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
+import { assertBoard, assertCompanyAccess, getActorInfo, hasCompanyAccess } from "./authz.js";
 
 function ruleView(rule: AgentKeyIssuerRule) {
   return {
@@ -68,8 +68,7 @@ export function agentKeyDelegationRoutes(db: Db) {
   async function loadBoardRule(req: Request) {
     assertBoard(req);
     const rule = await delegation.getRule(req.params.ruleId as string);
-    if (!rule || (req.actor.type === "board" && req.actor.source !== "local_implicit"
-      && !(req.actor.companyIds ?? []).includes(rule.companyId))) {
+    if (!rule || !hasCompanyAccess(req, rule.companyId)) {
       throw notFound("Issuer rule not found");
     }
     await assertBoardCanManageRules(req, rule.companyId);
@@ -86,7 +85,7 @@ export function agentKeyDelegationRoutes(db: Db) {
       throw forbidden("Scoped agent keys cannot manage delegated keys");
     }
     const rule = await delegation.getRule(req.params.ruleId as string);
-    if (!rule || rule.companyId !== req.actor.companyId) throw notFound("Issuer rule not found");
+    if (!rule || !hasCompanyAccess(req, rule.companyId)) throw notFound("Issuer rule not found");
     if (rule.issuerAgentId !== req.actor.agentId) {
       throw forbidden("Only the rule's issuer agent can manage these keys");
     }
