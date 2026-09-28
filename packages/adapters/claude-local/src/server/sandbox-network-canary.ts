@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Operator-only, time-boxed Claude sandbox network canary (ONY-213 / ONY-218).
+ * Operator-only, time-boxed Claude sandbox network canary.
  *
  * The setting lives in the Paperclip SERVER process environment, never in
  * `adapterConfig`: agents can PATCH their own adapterConfig (allow_self), and
