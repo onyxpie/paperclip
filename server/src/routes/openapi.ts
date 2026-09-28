@@ -3615,7 +3615,7 @@ registry.registerPath({
   tags: ["agents"],
   summary: "Rotate the calling issue_document_read key",
   description:
-    "Only issue_document_read keys may call this. The request body is ignored: the new key copies the calling key's scope and gets a fresh expiry capped by the matching issuer rule (30 days max). The calling key stops working when the new key is first used, or after 10 minutes.",
+    "Only issue_document_read keys may call this. The request body is ignored: the new key copies the calling key's scope and gets a fresh expiry capped by the matching issuer rule (30 days max). Returns 403 when no issuer rule covers the key. The calling key stops working when the new key is first used, or after 10 minutes.",
   responses: { 201: r.ok(), 401: r.unauthorized, 403: r.forbidden, 409: r.conflict },
 });
 
@@ -3657,6 +3657,7 @@ registry.registerPath({
   path: "/api/agent-key-issuer-rules/{ruleId}",
   tags: ["agents"],
   summary: "Delete a delegated agent key issuer rule (board only)",
+  description: "Also revokes every live issue_document_read key the rule covers; their ids are returned as revokedKeyIds.",
   request: { params: z.object({ ruleId: z.string() }) },
   responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
 });

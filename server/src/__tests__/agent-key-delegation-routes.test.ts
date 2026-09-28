@@ -531,6 +531,48 @@ describeEmbeddedPostgres("issue_document_read keys, rotation, delegated issuer a
     await assertNoSecretLeaks(s.company.id);
   }, 60_000);
 
+  it("K2/K3: a key cannot rotate without a covering rule, and deleting the rule revokes its keys", async () => {
+    const s = await seed();
+
+    // No rule covers this board-minted key: it cannot renew itself.
+    const unruled = await mintReadKey(s);
+    const denied = await request(app()).post("/api/agents/me/keys/rotate").set(bearer(unruled.token));
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect((await request(app()).get(docPath(s.issue.id)).set(bearer(unruled.token))).status).toBe(200);
+
+    const rule = await createRule(s);
+    const old = await mintReadKey(s);
+    const rotated = await request(app()).post("/api/agents/me/keys/rotate").set(bearer(old.token));
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(201);
+    const next = { id: rotated.body.id as string, token: remember(rotated.body.token as string) };
+    // A key for another document is outside the rule and must survive its deletion.
+    const outside = await mintReadKey(s, { documentKey: "plan" });
+
+    const deleted = await request(app()).delete(`/api/agent-key-issuer-rules/${rule.id}`);
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
+    expect([...deleted.body.revokedKeyIds].sort()).toEqual([unruled.id, old.id, next.id].sort());
+
+    // Every key the rule covered is dead immediately, including the one still in its rotation grace period.
+    for (const token of [unruled.token, old.token, next.token]) {
+      expect((await request(app()).get(docPath(s.issue.id)).set(bearer(token))).status).toBe(401);
+      expect((await request(app()).post("/api/agents/me/keys/rotate").set(bearer(token))).status).toBe(401);
+    }
+    expect((await request(app()).get(docPath(s.issue.id, "plan")).set(bearer(outside.token))).status).toBe(200);
+
+    const revokedRows = await ctx.db.select().from(agentApiKeys).where(eq(agentApiKeys.agentId, s.reader.id));
+    for (const id of [unruled.id, old.id, next.id]) {
+      expect(revokedRows.find((row) => row.id === id)?.revokedAt).toBeTruthy();
+    }
+    expect(revokedRows.find((row) => row.id === outside.id)?.revokedAt).toBeNull();
+
+    const rows = await activities(s.company.id);
+    expect(rows.find((row) => row.action === "agent_key_issuer_rule.deleted")?.details).toMatchObject({ ruleId: rule.id });
+    const revokedEntries = rows.filter((row) => row.action === "agent_key.revoked"
+      && (row.details as { reason?: string } | null)?.reason === "issuer_rule_deleted");
+    expect(revokedEntries.map((row) => row.entityId).sort()).toEqual([unruled.id, old.id, next.id].sort());
+    await assertNoSecretLeaks(s.company.id);
+  }, 60_000);
+
   it("K5: mint and board revoke entries carry holder, keyId, scope and expiry but never values", async () => {
     const s = await seed();
     const key = await mintReadKey(s);

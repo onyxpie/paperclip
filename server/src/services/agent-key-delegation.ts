@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agentApiKeys,
@@ -268,8 +268,28 @@ export function agentKeyDelegationService(db: Db) {
         .then((rows) => rows[0]!);
     },
 
+    /**
+     * Deletes the rule and, in the same transaction, revokes every live holder
+     * key it covers, so no key outlives the rule that let it be issued or rotated.
+     */
     deleteRule: async (rule: AgentKeyIssuerRule) => {
-      await db.delete(agentKeyIssuerRules).where(eq(agentKeyIssuerRules.id, rule.id));
+      return db.transaction(async (tx) => {
+        await tx.delete(agentKeyIssuerRules).where(eq(agentKeyIssuerRules.id, rule.id));
+        const holderKeys = await tx
+          .select()
+          .from(agentApiKeys)
+          .where(and(
+            eq(agentApiKeys.companyId, rule.companyId),
+            eq(agentApiKeys.agentId, rule.holderAgentId),
+            isNull(agentApiKeys.revokedAt),
+          ))
+          .for("update");
+        const keyIds = holderKeys.filter((row) => keyMatchesRule(row, rule)).map((row) => row.id);
+        if (keyIds.length > 0) {
+          await tx.update(agentApiKeys).set({ revokedAt: new Date() }).where(inArray(agentApiKeys.id, keyIds));
+        }
+        return { revokedKeyIds: keyIds };
+      });
     },
 
     /** Holder keys that exactly match the rule's kind, issue and document. */
@@ -427,7 +447,7 @@ export function agentKeyDelegationService(db: Db) {
     /**
      * Self-rotation for an `issue_document_read` key. The successor copies the
      * stored scope (never request input), keeps the caller's original lifetime
-     * capped by the issuer rule (or 30 days), and the caller's key stays valid
+     * capped by the issuer rule (403 when no rule covers the key), and the caller's key stays valid
      * until the successor is first used or the grace period ends.
      */
     rotate: async (keyId: string) => {
@@ -459,7 +479,12 @@ export function agentKeyDelegationService(db: Db) {
             eq(agentKeyIssuerRules.documentKey, scope.documentKey),
           ))
           .then((rows) => rows[0] ?? null);
-        const capMs = Math.min(rule?.maxTtlDays ?? AGENT_KEY_ISSUE_DOCUMENT_READ_MAX_TTL_DAYS, AGENT_KEY_ISSUE_DOCUMENT_READ_MAX_TTL_DAYS) * DAY_MS;
+        // Rotation is a delegated privilege: without a matching rule the key
+        // cannot renew itself and simply runs out at its current expiry.
+        if (!rule || rule.kind !== AGENT_KEY_KIND_ISSUE_DOCUMENT_READ) {
+          throw forbidden("No issuer rule covers this key; it cannot be rotated");
+        }
+        const capMs = Math.min(rule.maxTtlDays, AGENT_KEY_ISSUE_DOCUMENT_READ_MAX_TTL_DAYS) * DAY_MS;
         const originalLifetimeMs = current.expiresAt.getTime() - current.createdAt.getTime();
         const lifetimeMs = Math.max(60_000, Math.min(originalLifetimeMs, capMs));
 
@@ -481,7 +506,7 @@ export function agentKeyDelegationService(db: Db) {
           .where(eq(agentApiKeys.id, current.id))
           .returning()
           .then((rows) => rows[0]!);
-        return { previous, key: row, token, scope, ruleId: rule?.id ?? null };
+        return { previous, key: row, token, scope, ruleId: rule.id };
       });
     },
   };

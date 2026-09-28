@@ -159,7 +159,7 @@ export function agentKeyDelegationRoutes(db: Db) {
   router.delete("/agent-key-issuer-rules/:ruleId", async (req, res) => {
     const rule = await loadBoardRule(req);
     const actor = getActorInfo(req);
-    await delegation.deleteRule(rule);
+    const { revokedKeyIds } = await delegation.deleteRule(rule);
     await logActivity(db, {
       companyId: rule.companyId,
       actorType: actor.actorType,
@@ -172,9 +172,27 @@ export function agentKeyDelegationRoutes(db: Db) {
         issuerAgentId: rule.issuerAgentId,
         holderAgentId: rule.holderAgentId,
         scope: ruleScopeDetails(rule),
+        revokedKeyIds,
       },
     });
-    res.json({ ok: true });
+    for (const keyId of revokedKeyIds) {
+      await logActivity(db, {
+        companyId: rule.companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        action: "agent_key.revoked",
+        entityType: "agent_api_key",
+        entityId: keyId,
+        details: {
+          ruleId: rule.id,
+          holderAgentId: rule.holderAgentId,
+          keyId,
+          scope: ruleScopeDetails(rule),
+          reason: "issuer_rule_deleted",
+        },
+      });
+    }
+    res.json({ ok: true, revokedKeyIds });
   });
 
   // ---- Issuer: rule-bound key operations (K3/K4) ----
